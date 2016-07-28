@@ -986,6 +986,11 @@ namespace ts {
         expression: LeftHandSideExpression;
         name: Identifier;
     }
+    /** Brand for a PropertyAccessExpression which, like a QualifiedName, consists of a sequence of identifiers separated by dots. */
+    export interface PropertyAccessExpressionLikeQualifiedName extends PropertyAccessExpression {
+        _propertyAccessExpressionLikeQualifiedNameBrand?: any;
+        expression: Identifier | PropertyAccessExpressionLikeQualifiedName;
+    }
 
     export type IdentifierOrPropertyAccess = Identifier | PropertyAccessExpression;
 
@@ -2028,7 +2033,7 @@ namespace ts {
         moduleExportsSomeValue(moduleReferenceExpression: Expression): boolean;
         isArgumentsLocalBinding(node: Identifier): boolean;
         getExternalModuleFileFromDeclaration(declaration: ImportEqualsDeclaration | ImportDeclaration | ExportDeclaration | ModuleDeclaration): SourceFile;
-        getTypeReferenceDirectivesForEntityName(name: EntityName | PropertyAccessExpression): string[];
+        getTypeReferenceDirectivesForEntityName(name: EntityName | PropertyAccessExpressionLikeQualifiedName): string[];
         getTypeReferenceDirectivesForSymbol(symbol: Symbol, meaning?: SymbolFlags): string[];
     }
 

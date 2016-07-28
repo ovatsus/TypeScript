@@ -960,7 +960,7 @@ namespace ts {
                 return false;
             }
             const expression = (<ExpressionWithTypeArguments>parentClassExpression).expression;
-            if (resolveEntityName(expression, SymbolFlags.Interface, /*ignoreErrors*/ true)) {
+            if (resolveEntityNameDangerous(expression, SymbolFlags.Interface, /*ignoreErrors*/ true)) {
                 error(errorLocation, Diagnostics.Cannot_extend_an_interface_0_Did_you_mean_implements, getTextOfNode(expression));
                 return true;
             }
@@ -1249,8 +1249,14 @@ namespace ts {
             return symbol.parent ? getFullyQualifiedName(symbol.parent) + "." + symbolToString(symbol) : symbolToString(symbol);
         }
 
+
+        /** Non-type-safe version of resolveEntityName. */
+        function resolveEntityNameDangerous(name: Node, meaning: SymbolFlags, ignoreErrors?: boolean, dontResolveAlias?: boolean): Symbol {
+            return resolveEntityName(<Identifier>name, meaning, ignoreErrors, dontResolveAlias);
+        }
+
         // Resolves a qualified name and any involved aliases
-        function resolveEntityName(name: EntityName | Expression, meaning: SymbolFlags, ignoreErrors?: boolean, dontResolveAlias?: boolean): Symbol {
+        function resolveEntityName(name: EntityName | PropertyAccessExpressionLikeQualifiedName, meaning: SymbolFlags, ignoreErrors?: boolean, dontResolveAlias?: boolean): Symbol | undefined {
             if (nodeIsMissing(name)) {
                 return undefined;
             }
@@ -1265,7 +1271,7 @@ namespace ts {
                 }
             }
             else if (name.kind === SyntaxKind.QualifiedName || name.kind === SyntaxKind.PropertyAccessExpression) {
-                const left = name.kind === SyntaxKind.QualifiedName ? (<QualifiedName>name).left : (<PropertyAccessExpression>name).expression;
+                const left = name.kind === SyntaxKind.QualifiedName ? (<QualifiedName>name).left : (<PropertyAccessExpressionLikeQualifiedName>name).expression;
                 const right = name.kind === SyntaxKind.QualifiedName ? (<QualifiedName>name).right : (<PropertyAccessExpression>name).name;
 
                 const namespace = resolveEntityName(left, SymbolFlags.Namespace, ignoreErrors);
@@ -3603,7 +3609,7 @@ namespace ts {
                     if (baseTypeNodes) {
                         for (const node of baseTypeNodes) {
                             if (isSupportedExpressionWithTypeArguments(node)) {
-                                const baseSymbol = resolveEntityName(node.expression, SymbolFlags.Type, /*ignoreErrors*/ true);
+                                const baseSymbol = resolveEntityNameDangerous(node.expression, SymbolFlags.Type, /*ignoreErrors*/ true);
                                 if (!baseSymbol || !(baseSymbol.flags & SymbolFlags.Interface) || getDeclaredTypeOfClassOrInterface(baseSymbol).thisType) {
                                     return false;
                                 }
@@ -4912,7 +4918,7 @@ namespace ts {
                 return unknownSymbol;
             }
 
-            return resolveEntityName(typeReferenceName, SymbolFlags.Type) || unknownSymbol;
+            return resolveEntityNameDangerous(typeReferenceName, SymbolFlags.Type) || unknownSymbol;
         }
 
         function getTypeReferenceType(node: TypeReferenceNode | ExpressionWithTypeArguments | JSDocTypeReference, symbol: Symbol) {
@@ -4956,7 +4962,7 @@ namespace ts {
                     const typeNameOrExpression = node.kind === SyntaxKind.TypeReference ? (<TypeReferenceNode>node).typeName :
                         isSupportedExpressionWithTypeArguments(<ExpressionWithTypeArguments>node) ? (<ExpressionWithTypeArguments>node).expression :
                             undefined;
-                    symbol = typeNameOrExpression && resolveEntityName(typeNameOrExpression, SymbolFlags.Type) || unknownSymbol;
+                    symbol = typeNameOrExpression && resolveEntityNameDangerous(typeNameOrExpression, SymbolFlags.Type) || unknownSymbol;
                     type = symbol === unknownSymbol ? unknownType :
                         symbol.flags & (SymbolFlags.Class | SymbolFlags.Interface) ? getTypeFromClassOrInterfaceReference(node, symbol) :
                             symbol.flags & SymbolFlags.TypeAlias ? getTypeFromTypeAliasReference(node, symbol) :
@@ -17306,7 +17312,7 @@ namespace ts {
             return getLeftSideOfImportEqualsOrExportAssignment(node) !== undefined;
         }
 
-        function getSymbolOfEntityNameOrPropertyAccessExpression(entityName: EntityName | PropertyAccessExpression): Symbol {
+        function getSymbolOfEntityNameOrPropertyAccessExpression(entityName: EntityName | PropertyAccessExpression): Symbol | undefined {
             if (isDeclarationName(entityName)) {
                 return getSymbolOfNode(entityName.parent);
             }
@@ -17326,8 +17332,17 @@ namespace ts {
             }
 
             if (entityName.parent.kind === SyntaxKind.ExportAssignment) {
-                return resolveEntityName(<Identifier>entityName,
-                    /*all meanings*/ SymbolFlags.Value | SymbolFlags.Type | SymbolFlags.Namespace | SymbolFlags.Alias);
+                const checkedEntityName: EntityName | PropertyAccessExpressionLikeQualifiedName =
+                    entityName.kind === SyntaxKind.PropertyAccessExpression
+                        ? isPropertyAccessExpressionLikeQualifiedName(<PropertyAccessExpression>entityName)
+                            ? <PropertyAccessExpressionLikeQualifiedName>entityName
+                            : undefined
+                        : <EntityName> entityName;
+
+                if (checkedEntityName !== undefined) {
+                    return resolveEntityName(checkedEntityName,
+                        /*all meanings*/ SymbolFlags.Value | SymbolFlags.Type | SymbolFlags.Namespace | SymbolFlags.Alias);
+                }
             }
 
             if (entityName.kind !== SyntaxKind.PropertyAccessExpression) {
@@ -17441,9 +17456,14 @@ namespace ts {
 
             switch (node.kind) {
                 case SyntaxKind.Identifier:
-                case SyntaxKind.PropertyAccessExpression:
                 case SyntaxKind.QualifiedName:
-                    return getSymbolOfEntityNameOrPropertyAccessExpression(<EntityName | PropertyAccessExpression>node);
+                    return getSymbolOfEntityNameOrPropertyAccessExpression(<EntityName>node);
+
+                case SyntaxKind.PropertyAccessExpression:
+                    const p = <PropertyAccessExpression>node;
+                    if (isPropertyAccessExpressionLikeQualifiedName(p)) {
+                        return getSymbolOfEntityNameOrPropertyAccessExpression(p);
+                    }
 
                 case SyntaxKind.ThisKeyword:
                     const container = getThisContainer(node, /*includeArrowFunctions*/ false);
@@ -18053,7 +18073,7 @@ namespace ts {
             };
 
             // defined here to avoid outer scope pollution
-            function getTypeReferenceDirectivesForEntityName(node: EntityName | PropertyAccessExpression): string[] {
+            function getTypeReferenceDirectivesForEntityName(node: EntityName | PropertyAccessExpressionLikeQualifiedName): string[] {
                 // program does not have any files with type reference directives - bail out
                 if (!fileToDirective) {
                     return undefined;

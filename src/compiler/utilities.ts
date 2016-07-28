@@ -1097,6 +1097,17 @@ namespace ts {
         return node.kind === SyntaxKind.PropertyAccessExpression;
     }
 
+    export function isPropertyAccessExpressionLikeQualifiedName(node: PropertyAccessExpression): node is PropertyAccessExpressionLikeQualifiedName {
+        switch (node.expression.kind) {
+            case SyntaxKind.Identifier:
+                return true;
+            case SyntaxKind.PropertyAccessExpression:
+                return isPropertyAccessExpressionLikeQualifiedName(<PropertyAccessExpression>node.expression);
+            default:
+                return false;
+        }
+    }
+
     export function isElementAccessExpression(node: Node): node is ElementAccessExpression {
         return node.kind === SyntaxKind.ElementAccessExpression;
     }
@@ -2698,6 +2709,7 @@ namespace ts {
         }
     }
 
+    //suspicious
     export function isRightSideOfQualifiedNameOrPropertyAccess(node: Node) {
         return (node.parent.kind === SyntaxKind.QualifiedName && (<QualifiedName>node.parent).right === node) ||
             (node.parent.kind === SyntaxKind.PropertyAccessExpression && (<PropertyAccessExpression>node.parent).name === node);
